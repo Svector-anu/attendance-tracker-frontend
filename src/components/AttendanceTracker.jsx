@@ -1,6 +1,9 @@
 // AttendanceTracker.jsx
 import React, { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
+// 
+import { useAppKit } from '@reown/appkit/react';
+
 import './AttendanceTracker.css';
 
 const contractABI = [
@@ -17,7 +20,7 @@ const contractABI = [
   "event UserEvicted(address indexed user)"
 ];
 
-const contractAddress = "0x7cc422e70e02Ae48539C3F83B032D318d534B450"; // Replace with your deployed contract address
+const contractAddress = "0x7cc422e70e02Ae48539C3F83B032D318d534B450"; // Your deployed contract address
 
 // Course details for display purposes
 const COURSE_DETAILS = {
@@ -28,9 +31,13 @@ const COURSE_DETAILS = {
 };
 
 function AttendanceTracker() {
-  const [provider, setProvider] = useState(null);
+  // Use Reown WalletKit hook instead of window.ethereum
+  // 
+  const { connect, account, provider } = useAppKit();
+
+
+  // Local state for our app
   const [contract, setContract] = useState(null);
-  const [account, setAccount] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
   const [isRegistered, setIsRegistered] = useState(false);
   const [userProfile, setUserProfile] = useState("");
@@ -44,68 +51,33 @@ function AttendanceTracker() {
   const [attendanceStatus, setAttendanceStatus] = useState(true);
   const [notification, setNotification] = useState({ show: false, message: "", type: "" });
 
-  // On mount, check for a stored account and set up listener for account changes
+  // When provider and account are available, initialize the contract and fetch registration info
   useEffect(() => {
-    const storedAccount = localStorage.getItem("connectedAccount");
-    if (storedAccount) {
-      connectWallet();
-    }
-    if (window.ethereum) {
-      window.ethereum.on("accountsChanged", (accounts) => {
-        if (accounts.length > 0) {
-          setAccount(accounts[0]);
-          localStorage.setItem("connectedAccount", accounts[0]);
-        } else {
-          setAccount("");
-          localStorage.removeItem("connectedAccount");
-        }
-      });
-    }
-  }, []);
-
-  // Connect wallet and contract, then check registration
-  const connectWallet = async () => {
-    if (window.ethereum) {
-      try {
-        setLoading(true);
-        const providerInstance = new ethers.providers.Web3Provider(window.ethereum);
-        const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-        console.log("Accounts retrieved:", accounts);
-        const userAccount = accounts[0];
-        setAccount(userAccount);
-        localStorage.setItem("connectedAccount", userAccount);
-        setProvider(providerInstance);
-        
-        const contractInstance = new ethers.Contract(contractAddress, contractABI, providerInstance.getSigner());
-        setContract(contractInstance);
-        
-        const adminAddress = await contractInstance.admin();
-        console.log("Admin Address:", adminAddress);
-        if (userAccount.toLowerCase() === adminAddress.toLowerCase()) {
-          setIsAdmin(true);
-        }
-        
-        // Check if user is registered
+    if (provider && account) {
+      const contractInstance = new ethers.Contract(contractAddress, contractABI, provider.getSigner());
+      setContract(contractInstance);
+      
+      const fetchContractData = async () => {
         try {
-          const userData = await contractInstance.users(userAccount);
-          console.log("User Data:", userData);
+          const adminAddress = await contractInstance.admin();
+          if (account.toLowerCase() === adminAddress.toLowerCase()) {
+            setIsAdmin(true);
+          }
+          const userData = await contractInstance.users(account);
           const registered = userData[1];
           const storedProfile = userData[0];
           setIsRegistered(registered);
-          if (registered) setUserProfile(storedProfile);
+          if (registered) {
+            setUserProfile(storedProfile);
+          }
         } catch (err) {
-          console.error("Registration check error:", err);
+          console.error("Error fetching contract data:", err);
+          setError("Error fetching contract data");
         }
-      } catch (err) {
-        console.error("Wallet connection error:", err);
-        setError("Failed to connect wallet");
-      } finally {
-        setLoading(false);
-      }
-    } else {
-      setError("MetaMask not detected. Please install MetaMask.");
+      };
+      fetchContractData();
     }
-  };
+  }, [provider, account]);
 
   // Notification helper
   const showNotification = (message, type) => {
@@ -247,7 +219,7 @@ function AttendanceTracker() {
               {isRegistered && <span className="user-badge">{userProfile}</span>}
             </>
           ) : (
-            <button className="connect-btn" onClick={connectWallet}>
+            <button className="connect-btn" onClick={connect}>
               Connect Wallet
             </button>
           )}
@@ -316,7 +288,9 @@ function AttendanceTracker() {
           {signedIn && (
             <div className="attendance-section">
               <h2>Mark Your Attendance</h2>
-              <p>Select a date to mark or check your attendance. (Only valid dates within the course schedule are accepted.)</p>
+              <p>
+                Select a date to mark or check your attendance. (Only valid dates within the course schedule are accepted.)
+              </p>
               <div className="date-picker">
                 <input
                   type="date"
